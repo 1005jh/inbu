@@ -1,0 +1,3 @@
+# Copy this file to local.properties and fill in values for your machine.
+sdk.dir=/path/to/Android/sdk
+KAKAO_NATIVE_APP_KEY=your_native_app_key

@@ -1,0 +1,46 @@
+# 인부장부
+
+건설 현장의 작업 인원, 공수, 일당과 지급 상태를 기록하고 조회하는 Android 앱입니다.
+
+## 개발 환경
+
+- Android Studio 2026.1.1 Patch 2
+- Android Gradle Plugin 9.2.1
+- Gradle 9.4.1
+- JDK 17
+- Kotlin 2.3.21
+- Jetpack Compose BOM 2026.06.00
+- compileSdk 37 / targetSdk 37 / minSdk 26
+- Node.js 24.18.0 LTS (`nvm use`)
+
+## 저장소 방향
+
+앱의 화면과 업무 규칙은 공통으로 유지하고 저장소 구현만 교체할 수 있게 개발합니다.
+
+- 로컬 버전: 기기 내부 데이터베이스
+- 서버 버전: 서버 API와 데이터베이스
+
+서버 버전은 카카오 로그인만 제공하며, Android 앱에서 받은 카카오 인증 결과를
+서버 세션으로 교환하는 구조로 개발합니다.
+
+## 카카오 로그인 설정
+
+카카오 Developers에서 카카오 로그인을 활성화하고 Android 플랫폼을 등록합니다.
+패키지명은 앱의 `applicationId`와 동일하게 입력하고, 개발·배포 인증서의 키 해시를
+각각 생성해 등록합니다.
+
+그 후 Git에 포함되지 않는 `local.properties`에 네이티브 앱 키를 추가합니다.
+
+```properties
+KAKAO_NATIVE_APP_KEY=발급받은_네이티브_앱_키
+```
+
+앱 키가 없더라도 프로젝트는 빌드되며, 로그인 버튼을 누르면 설정 안내를 표시합니다.
+
+## 실행
+
+```bash
+./gradlew assembleDebug
+```
+
+디버그 APK는 `app/build/outputs/apk/debug/app-debug.apk`에 생성됩니다.
