@@ -90,9 +90,11 @@ class LocalLedgerDataSource(context: Context) : LedgerDataSource {
 
     override fun updateWorker(worker: WorkerSummary, callback: (Result<LedgerSnapshot>) -> Unit) = mutate(callback) { db ->
         validateWorker(worker)
+        validateWorkerWageChange(db, worker)
         val changed = db.update("workers", worker.values(), "id=?", arrayOf(worker.id.toString()))
         requireLocal(changed == 1, "인부를 찾을 수 없어요.")
         replaceSiteWages(db, worker.id, worker.siteDailyWages)
+        updateWorkerRecordWages(db, worker)
     }
 
     override fun createRecord(record: WorkRecordSummary, callback: (Result<LedgerSnapshot>) -> Unit) = mutate(callback) { db ->
@@ -259,6 +261,58 @@ class LocalLedgerDataSource(context: Context) : LedgerDataSource {
         }
     }
 
+    private fun validateWorkerWageChange(db: SQLiteDatabase, worker: WorkerSummary) {
+        workerRecordWages(db, worker).forEach { (recordId, currentWage, updatedWage) ->
+            if (currentWage != updatedWage) {
+                val hasPayment = db.rawQuery(
+                    "SELECT COUNT(*) FROM payment_allocations WHERE record_id=? AND worker_id=?",
+                    arrayOf(recordId.toString(), worker.id.toString()),
+                ).use { cursor ->
+                    cursor.moveToFirst()
+                    cursor.getLong(0) > 0L
+                }
+                requireLocal(!hasPayment, "지급 완료된 작업이 있어 일당을 변경할 수 없어요. 먼저 지급을 취소해 주세요.")
+            }
+        }
+    }
+
+    private fun updateWorkerRecordWages(db: SQLiteDatabase, worker: WorkerSummary) {
+        workerRecordWages(db, worker).forEach { (recordId, currentWage, updatedWage) ->
+            if (currentWage != updatedWage) {
+                db.update(
+                    "record_workers",
+                    ContentValues().apply { put("daily_wage", updatedWage) },
+                    "record_id=? AND worker_id=?",
+                    arrayOf(recordId.toString(), worker.id.toString()),
+                )
+            }
+        }
+    }
+
+    private fun workerRecordWages(
+        db: SQLiteDatabase,
+        worker: WorkerSummary,
+    ): List<WorkerRecordWage> {
+        val result = mutableListOf<WorkerRecordWage>()
+        db.rawQuery(
+            """SELECT rw.record_id,r.site_id,rw.daily_wage
+                FROM record_workers rw
+                JOIN work_records r ON r.id=rw.record_id
+                WHERE rw.worker_id=?""",
+            arrayOf(worker.id.toString()),
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val siteId = cursor.long("site_id")
+                result += WorkerRecordWage(
+                    recordId = cursor.long("record_id"),
+                    currentWage = cursor.long("daily_wage"),
+                    updatedWage = worker.siteDailyWages[siteId] ?: worker.dailyWage,
+                )
+            }
+        }
+        return result
+    }
+
     private fun insertRecordWorkers(db: SQLiteDatabase, recordId: Long, workers: List<WorkerWorkAmount>) {
         workers.forEach { work ->
             db.insertOrThrow(
@@ -291,6 +345,12 @@ class LocalLedgerDataSource(context: Context) : LedgerDataSource {
         put("deleted", 0)
     }
 }
+
+private data class WorkerRecordWage(
+    val recordId: Long,
+    val currentWage: Long,
+    val updatedWage: Long,
+)
 
 private class LocalLedgerDatabase(context: Context) : SQLiteOpenHelper(context, "inbu_ledger.db", null, 1) {
     override fun onConfigure(db: SQLiteDatabase) {

@@ -198,7 +198,7 @@ fun WorkerPaymentScreen(
                     modifier = Modifier.padding(top = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items(availableSites, key = { it.id }) { site ->
+                    items(availableSites, key = { "site-${it.id}" }) { site ->
                         FilterChip(
                             selected = selectedSiteId == site.id,
                             onClick = { selectedSiteId = site.id },
@@ -256,7 +256,7 @@ fun WorkerPaymentScreen(
                 )
             }
 
-            items(visibleWorks, key = { it.record.id }) { work ->
+            items(visibleWorks, key = { "work-${it.record.id}" }) { work ->
                 val siteName = sites.firstOrNull { it.id == work.record.siteId }?.name ?: "삭제된 현장"
                 val isInSettlement = selectedSiteId == work.record.siteId && work.record.dateEpochDay <= cutoffEpochDay
                 Card(
@@ -295,7 +295,7 @@ fun WorkerPaymentScreen(
                 item {
                     Text("지급 내역", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 }
-                items(workerPayments, key = { it.id }) { payment ->
+                items(workerPayments, key = { "payment-${it.id}" }) { payment ->
                     val siteName = sites.firstOrNull { it.id == payment.siteId }?.name ?: "삭제된 현장"
                     Card(
                         modifier = Modifier.fillMaxWidth(),
