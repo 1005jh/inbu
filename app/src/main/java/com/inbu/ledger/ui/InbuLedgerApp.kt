@@ -12,8 +12,10 @@ import android.widget.Toast
 import com.inbu.ledger.BuildConfig
 import com.inbu.ledger.auth.KakaoLoginClient
 import com.inbu.ledger.auth.KakaoLoginResult
+import com.inbu.ledger.data.LedgerDataSource
 import com.inbu.ledger.data.LedgerApiClient
 import com.inbu.ledger.data.LedgerSnapshot
+import com.inbu.ledger.data.LocalLedgerDataSource
 import com.inbu.ledger.ui.auth.LoginScreen
 import com.inbu.ledger.ui.home.HomeScreen
 import com.inbu.ledger.ui.home.HomeUiState
@@ -68,8 +70,11 @@ fun InbuLedgerApp() {
     val context = LocalContext.current
     val loginClient = remember { KakaoLoginClient() }
     val apiClient = remember { LedgerApiClient(context.applicationContext) }
+    val localDataSource = remember { LocalLedgerDataSource(context.applicationContext) }
+    val dataSource: LedgerDataSource = if (BuildConfig.OFFLINE_MODE) localDataSource else apiClient
+    val usesInMemoryData = BuildConfig.UI_REVIEW_MODE
     var appScreen by rememberSaveable {
-        mutableStateOf(if (BuildConfig.UI_REVIEW_MODE) AppScreen.Home else AppScreen.Login)
+        mutableStateOf(if (BuildConfig.UI_REVIEW_MODE || BuildConfig.OFFLINE_MODE) AppScreen.Home else AppScreen.Login)
     }
     var isLoggingIn by rememberSaveable { mutableStateOf(false) }
     var loginMessage by rememberSaveable { mutableStateOf<String?>(null) }
@@ -108,7 +113,7 @@ fun InbuLedgerApp() {
             },
             onFailure = {
                 Toast.makeText(context, it.message ?: "서버 요청에 실패했어요.", Toast.LENGTH_SHORT).show()
-                if (!apiClient.hasSession) appScreen = AppScreen.Login
+                if (!BuildConfig.OFFLINE_MODE && !apiClient.hasSession) appScreen = AppScreen.Login
             },
         )
     }
@@ -116,6 +121,11 @@ fun InbuLedgerApp() {
     LaunchedEffect(Unit) {
         if (!BuildConfig.UI_REVIEW_MODE) {
             when {
+                BuildConfig.OFFLINE_MODE -> {
+                    localDataSource.loadLedger { result ->
+                        handleSnapshot(result) { appScreen = AppScreen.Home }
+                    }
+                }
                 apiClient.hasSession -> {
                     isLoggingIn = true
                     apiClient.loadLedger { result ->
@@ -209,7 +219,7 @@ fun InbuLedgerApp() {
         AppScreen.AddSite -> AddSiteScreen(
             onBack = { appScreen = AppScreen.Sites },
             onSave = { name, memo ->
-                if (BuildConfig.UI_REVIEW_MODE) {
+                if (usesInMemoryData) {
                     val newSite = SiteSummary(
                         id = (sites.maxOfOrNull { it.id } ?: 0L) + 1L,
                         name = name,
@@ -221,7 +231,7 @@ fun InbuLedgerApp() {
                     sites = listOf(newSite) + sites
                     appScreen = AppScreen.Sites
                 } else {
-                    apiClient.createSite(name, memo) { handleSnapshot(it) { appScreen = AppScreen.Sites } }
+                    dataSource.createSite(name, memo) { handleSnapshot(it) { appScreen = AppScreen.Sites } }
                 }
             },
         )
@@ -234,22 +244,22 @@ fun InbuLedgerApp() {
                     site = selectedSite,
                     onBack = { appScreen = AppScreen.Sites },
                     onSave = { updatedSite ->
-                        if (BuildConfig.UI_REVIEW_MODE) {
+                        if (usesInMemoryData) {
                             sites = sites.map { site ->
                                 if (site.id == updatedSite.id) updatedSite else site
                             }
                         } else {
-                            apiClient.updateSite(updatedSite) { handleSnapshot(it) }
+                            dataSource.updateSite(updatedSite) { handleSnapshot(it) }
                         }
                     },
                     onMoveToTrash = {
-                        if (BuildConfig.UI_REVIEW_MODE) {
+                        if (usesInMemoryData) {
                             deletedSites = listOf(selectedSite) + deletedSites
                             sites = sites.filterNot { it.id == selectedSite.id }
                             selectedSiteId = null
                             appScreen = AppScreen.Sites
                         } else {
-                            apiClient.trashSite(selectedSite.id) {
+                            dataSource.trashSite(selectedSite.id) {
                                 handleSnapshot(it) {
                                     selectedSiteId = null
                                     appScreen = AppScreen.Sites
@@ -290,11 +300,11 @@ fun InbuLedgerApp() {
                     unpaidAmount = 0,
                     isActive = true,
                 )
-                if (BuildConfig.UI_REVIEW_MODE) {
+                if (usesInMemoryData) {
                     workers = listOf(newWorker) + workers
                     appScreen = AppScreen.Workers
                 } else {
-                    apiClient.createWorker(newWorker) { handleSnapshot(it) { appScreen = AppScreen.Workers } }
+                    dataSource.createWorker(newWorker) { handleSnapshot(it) { appScreen = AppScreen.Workers } }
                 }
             },
         )
@@ -308,22 +318,22 @@ fun InbuLedgerApp() {
                     sites = sites,
                     onBack = { appScreen = AppScreen.Workers },
                     onSave = { updatedWorker ->
-                        if (BuildConfig.UI_REVIEW_MODE) {
+                        if (usesInMemoryData) {
                             workers = workers.map { worker ->
                                 if (worker.id == updatedWorker.id) updatedWorker else worker
                             }
                         } else {
-                            apiClient.updateWorker(updatedWorker) { handleSnapshot(it) }
+                            dataSource.updateWorker(updatedWorker) { handleSnapshot(it) }
                         }
                     },
                     onActiveChange = { isActive ->
                         val updatedWorker = selectedWorker.copy(isActive = isActive)
-                        if (BuildConfig.UI_REVIEW_MODE) {
+                        if (usesInMemoryData) {
                             workers = workers.map { worker ->
                                 if (worker.id == selectedWorker.id) updatedWorker else worker
                             }
                         } else {
-                            apiClient.updateWorker(updatedWorker) { handleSnapshot(it) }
+                            dataSource.updateWorker(updatedWorker) { handleSnapshot(it) }
                         }
                     },
                 )
@@ -343,13 +353,13 @@ fun InbuLedgerApp() {
                     fuelCost = fuelCost,
                     mealCost = mealCost,
                 )
-                if (BuildConfig.UI_REVIEW_MODE) {
+                if (usesInMemoryData) {
                     workRecords = listOf(newRecord) + workRecords
                     workers = workers.applyWorkerRecord(newRecord, direction = 1)
                     sites = sites.applySiteRecord(newRecord, direction = 1)
                     appScreen = AppScreen.Home
                 } else {
-                    apiClient.createRecord(newRecord) { handleSnapshot(it) { appScreen = AppScreen.Home } }
+                    dataSource.createRecord(newRecord) { handleSnapshot(it) { appScreen = AppScreen.Home } }
                 }
             },
             onSectionSelected = { section ->
@@ -404,7 +414,7 @@ fun InbuLedgerApp() {
                     onBack = { appScreen = AppScreen.Records },
                     onEdit = { appScreen = AppScreen.EditRecord },
                     onMoveToTrash = {
-                        if (BuildConfig.UI_REVIEW_MODE) {
+                        if (usesInMemoryData) {
                             workers = workers.applyWorkerRecord(record, direction = -1)
                             sites = sites.applySiteRecord(record, direction = -1)
                             workRecords = workRecords.filterNot { it.id == record.id }
@@ -412,7 +422,7 @@ fun InbuLedgerApp() {
                             selectedRecordId = null
                             appScreen = AppScreen.Records
                         } else {
-                            apiClient.trashRecord(record.id) {
+                            dataSource.trashRecord(record.id) {
                                 handleSnapshot(it) {
                                     selectedRecordId = null
                                     appScreen = AppScreen.Records
@@ -443,7 +453,7 @@ fun InbuLedgerApp() {
                             fuelCost = fuelCost,
                             mealCost = mealCost,
                         )
-                        if (BuildConfig.UI_REVIEW_MODE) {
+                        if (usesInMemoryData) {
                             workers = workers
                                 .applyWorkerRecord(originalRecord, direction = -1)
                                 .applyWorkerRecord(updatedRecord, direction = 1)
@@ -455,7 +465,7 @@ fun InbuLedgerApp() {
                             }
                             appScreen = AppScreen.RecordDetail
                         } else {
-                            apiClient.updateRecord(updatedRecord) { handleSnapshot(it) { appScreen = AppScreen.RecordDetail } }
+                            dataSource.updateRecord(updatedRecord) { handleSnapshot(it) { appScreen = AppScreen.RecordDetail } }
                         }
                     },
                 )
@@ -469,7 +479,7 @@ fun InbuLedgerApp() {
             }.toSet(),
             onBack = { appScreen = AppScreen.Records },
             onRestore = { recordId ->
-                if (BuildConfig.UI_REVIEW_MODE) {
+                if (usesInMemoryData) {
                     deletedWorkRecords.firstOrNull { it.id == recordId }?.let { record ->
                         workers = workers.applyWorkerRecord(record, direction = 1)
                         sites = sites.applySiteRecord(record, direction = 1)
@@ -477,14 +487,14 @@ fun InbuLedgerApp() {
                         deletedWorkRecords = deletedWorkRecords.filterNot { it.id == recordId }
                     }
                 } else {
-                    apiClient.restoreRecord(recordId) { handleSnapshot(it) }
+                    dataSource.restoreRecord(recordId) { handleSnapshot(it) }
                 }
             },
             onDeletePermanently = { recordId ->
-                if (BuildConfig.UI_REVIEW_MODE) {
+                if (usesInMemoryData) {
                     deletedWorkRecords = deletedWorkRecords.filterNot { it.id == recordId }
                 } else {
-                    apiClient.deleteRecord(recordId) { handleSnapshot(it) }
+                    dataSource.deleteRecord(recordId) { handleSnapshot(it) }
                 }
             },
         )
@@ -524,7 +534,7 @@ fun InbuLedgerApp() {
                         appScreen = if (paymentBackToRecords) AppScreen.Records else AppScreen.Payments
                     },
                     onSettle = { siteId, cutoffEpochDay ->
-                        if (BuildConfig.UI_REVIEW_MODE) {
+                        if (usesInMemoryData) {
                             val payment = settlePayment(
                                 id = (payments.maxOfOrNull { it.id } ?: 0L) + 1L,
                                 workerId = worker.id,
@@ -553,11 +563,11 @@ fun InbuLedgerApp() {
                                 }
                             }
                         } else {
-                            apiClient.settlePayment(worker.id, siteId, cutoffEpochDay) { handleSnapshot(it) }
+                            dataSource.settlePayment(worker.id, siteId, cutoffEpochDay) { handleSnapshot(it) }
                         }
                     },
                     onCancelPayment = { paymentId ->
-                        if (BuildConfig.UI_REVIEW_MODE) {
+                        if (usesInMemoryData) {
                             payments.firstOrNull { it.id == paymentId }?.let { payment ->
                                 payments = payments.filterNot { it.id == paymentId }
                                 workers = workers.map { item ->
@@ -576,7 +586,7 @@ fun InbuLedgerApp() {
                                 }
                             }
                         } else {
-                            apiClient.cancelPayment(paymentId) { handleSnapshot(it) }
+                            dataSource.cancelPayment(paymentId) { handleSnapshot(it) }
                         }
                     },
                 )
@@ -591,20 +601,20 @@ fun InbuLedgerApp() {
             },
             onBack = { appScreen = AppScreen.Sites },
             onRestore = { siteId ->
-                if (BuildConfig.UI_REVIEW_MODE) {
+                if (usesInMemoryData) {
                     deletedSites.firstOrNull { it.id == siteId }?.let { site ->
                         sites = listOf(site) + sites
                         deletedSites = deletedSites.filterNot { it.id == siteId }
                     }
                 } else {
-                    apiClient.restoreSite(siteId) { handleSnapshot(it) }
+                    dataSource.restoreSite(siteId) { handleSnapshot(it) }
                 }
             },
             onDeletePermanently = { siteId ->
-                if (BuildConfig.UI_REVIEW_MODE) {
+                if (usesInMemoryData) {
                     deletedSites = deletedSites.filterNot { it.id == siteId }
                 } else {
-                    apiClient.deleteSite(siteId) { handleSnapshot(it) }
+                    dataSource.deleteSite(siteId) { handleSnapshot(it) }
                 }
             },
         )

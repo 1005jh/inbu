@@ -15,9 +15,9 @@
 
 ## 저장소 방향
 
-앱의 화면과 업무 규칙은 공통으로 유지하고 저장소 구현만 교체할 수 있게 개발합니다.
+앱의 화면과 업무 규칙은 공통으로 유지하고 저장 방식만 교체할 수 있게 개발합니다.
 
-- 로컬 버전: 기기 내부 데이터베이스
+- 기기 저장 버전(`offline`): 로그인과 서버 없이 기기 내부 SQLite 데이터베이스만 사용
 - 서버 버전: 서버 API와 데이터베이스
 
 서버 버전은 카카오 로그인만 제공하며, Android 앱에서 받은 카카오 인증 결과를
@@ -41,10 +41,18 @@ cp local.properties.example local.properties
 ## 실행
 
 ```bash
-./gradlew assembleDebug
+./gradlew :app:assembleOnlineDebug
+./gradlew :app:assembleOfflineDebug
 ```
 
-디버그 APK는 `app/build/outputs/apk/debug/app-debug.apk`에 생성됩니다.
+디버그 APK는 다음 위치에 생성됩니다.
+
+- 서버 버전: `app/build/outputs/apk/online/debug/app-online-debug.apk`
+- 기기 저장 버전: `app/build/outputs/apk/offline/debug/app-offline-debug.apk`
+
+기기 저장 버전은 앱을 실행하면 로그인 화면 없이 바로 홈으로 이동합니다. 인터넷 권한,
+카카오 SDK 및 서버 연결이 포함되지 않으며 앱을 삭제하기 전까지 해당 기기 안에 기록이
+보관됩니다.
 
 ## API 서버 연결
 

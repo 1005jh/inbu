@@ -20,6 +20,8 @@ android {
     namespace = "com.inbu.ledger"
     compileSdk = 37
 
+    flavorDimensions += "storage"
+
     defaultConfig {
         applicationId = "com.inbu.ledger"
         minSdk = 26
@@ -42,6 +44,19 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+        }
+    }
+
+    productFlavors {
+        create("online") {
+            dimension = "storage"
+            buildConfigField("boolean", "OFFLINE_MODE", "false")
+        }
+        create("offline") {
+            dimension = "storage"
+            applicationIdSuffix = ".offline"
+            versionNameSuffix = "-offline"
+            buildConfigField("boolean", "OFFLINE_MODE", "true")
         }
     }
 
@@ -68,7 +83,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")
-    implementation("com.kakao.sdk:v2-user:2.24.0")
+    "onlineImplementation"("com.kakao.sdk:v2-user:2.24.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

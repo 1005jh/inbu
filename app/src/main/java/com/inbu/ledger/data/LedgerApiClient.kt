@@ -27,7 +27,7 @@ data class LedgerSnapshot(
     val payments: List<WorkerPayment>,
 )
 
-class LedgerApiClient(context: Context) {
+class LedgerApiClient(context: Context) : LedgerDataSource {
     private val preferences = context.getSharedPreferences("inbu_session", Context.MODE_PRIVATE)
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -68,48 +68,48 @@ class LedgerApiClient(context: Context) {
         }
     }
 
-    fun loadLedger(callback: (Result<LedgerSnapshot>) -> Unit) = execute(callback) {
+    override fun loadLedger(callback: (Result<LedgerSnapshot>) -> Unit) = execute(callback) {
         request("GET", "/api/v1/ledger").toLedgerSnapshot()
     }
 
-    fun createSite(name: String, memo: String, callback: (Result<LedgerSnapshot>) -> Unit) = mutate(
+    override fun createSite(name: String, memo: String, callback: (Result<LedgerSnapshot>) -> Unit) = mutate(
         "POST", "/api/v1/sites", JSONObject().put("name", name).put("memo", memo).put("status", "Active"), callback,
     )
 
-    fun updateSite(site: SiteSummary, callback: (Result<LedgerSnapshot>) -> Unit) = mutate(
+    override fun updateSite(site: SiteSummary, callback: (Result<LedgerSnapshot>) -> Unit) = mutate(
         "PUT", "/api/v1/sites/${site.id}", JSONObject().put("name", site.name).put("memo", site.memo).put("status", site.status.name), callback,
     )
 
-    fun trashSite(id: Long, callback: (Result<LedgerSnapshot>) -> Unit) = mutate("DELETE", "/api/v1/sites/$id", null, callback)
-    fun restoreSite(id: Long, callback: (Result<LedgerSnapshot>) -> Unit) = mutate("POST", "/api/v1/sites/$id/restore", JSONObject(), callback)
-    fun deleteSite(id: Long, callback: (Result<LedgerSnapshot>) -> Unit) = mutate("DELETE", "/api/v1/sites/$id/permanent", null, callback)
+    override fun trashSite(id: Long, callback: (Result<LedgerSnapshot>) -> Unit) = mutate("DELETE", "/api/v1/sites/$id", null, callback)
+    override fun restoreSite(id: Long, callback: (Result<LedgerSnapshot>) -> Unit) = mutate("POST", "/api/v1/sites/$id/restore", JSONObject(), callback)
+    override fun deleteSite(id: Long, callback: (Result<LedgerSnapshot>) -> Unit) = mutate("DELETE", "/api/v1/sites/$id/permanent", null, callback)
 
-    fun createWorker(worker: WorkerSummary, callback: (Result<LedgerSnapshot>) -> Unit) = mutate(
+    override fun createWorker(worker: WorkerSummary, callback: (Result<LedgerSnapshot>) -> Unit) = mutate(
         "POST", "/api/v1/workers", worker.toRequestJson(), callback,
     )
 
-    fun updateWorker(worker: WorkerSummary, callback: (Result<LedgerSnapshot>) -> Unit) = mutate(
+    override fun updateWorker(worker: WorkerSummary, callback: (Result<LedgerSnapshot>) -> Unit) = mutate(
         "PUT", "/api/v1/workers/${worker.id}", worker.toRequestJson(), callback,
     )
 
-    fun createRecord(record: WorkRecordSummary, callback: (Result<LedgerSnapshot>) -> Unit) = mutate(
+    override fun createRecord(record: WorkRecordSummary, callback: (Result<LedgerSnapshot>) -> Unit) = mutate(
         "POST", "/api/v1/records", record.toRequestJson(), callback,
     )
 
-    fun updateRecord(record: WorkRecordSummary, callback: (Result<LedgerSnapshot>) -> Unit) = mutate(
+    override fun updateRecord(record: WorkRecordSummary, callback: (Result<LedgerSnapshot>) -> Unit) = mutate(
         "PUT", "/api/v1/records/${record.id}", record.toRequestJson(), callback,
     )
 
-    fun trashRecord(id: Long, callback: (Result<LedgerSnapshot>) -> Unit) = mutate("DELETE", "/api/v1/records/$id", null, callback)
-    fun restoreRecord(id: Long, callback: (Result<LedgerSnapshot>) -> Unit) = mutate("POST", "/api/v1/records/$id/restore", JSONObject(), callback)
-    fun deleteRecord(id: Long, callback: (Result<LedgerSnapshot>) -> Unit) = mutate("DELETE", "/api/v1/records/$id/permanent", null, callback)
+    override fun trashRecord(id: Long, callback: (Result<LedgerSnapshot>) -> Unit) = mutate("DELETE", "/api/v1/records/$id", null, callback)
+    override fun restoreRecord(id: Long, callback: (Result<LedgerSnapshot>) -> Unit) = mutate("POST", "/api/v1/records/$id/restore", JSONObject(), callback)
+    override fun deleteRecord(id: Long, callback: (Result<LedgerSnapshot>) -> Unit) = mutate("DELETE", "/api/v1/records/$id/permanent", null, callback)
 
-    fun settlePayment(workerId: Long, siteId: Long, cutoffEpochDay: Long, callback: (Result<LedgerSnapshot>) -> Unit) = mutate(
+    override fun settlePayment(workerId: Long, siteId: Long, cutoffEpochDay: Long, callback: (Result<LedgerSnapshot>) -> Unit) = mutate(
         "POST", "/api/v1/payments/settle",
         JSONObject().put("workerId", workerId).put("siteId", siteId).put("cutoffEpochDay", cutoffEpochDay), callback,
     )
 
-    fun cancelPayment(id: Long, callback: (Result<LedgerSnapshot>) -> Unit) = mutate("DELETE", "/api/v1/payments/$id", null, callback)
+    override fun cancelPayment(id: Long, callback: (Result<LedgerSnapshot>) -> Unit) = mutate("DELETE", "/api/v1/payments/$id", null, callback)
 
     private fun mutate(method: String, path: String, body: JSONObject?, callback: (Result<LedgerSnapshot>) -> Unit) = execute(callback) {
         request(method, path, body).toLedgerSnapshot()

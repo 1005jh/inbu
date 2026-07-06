@@ -13,34 +13,19 @@ sealed interface KakaoLoginResult {
 }
 
 class KakaoLoginClient {
-    fun login(
-        context: Context,
-        onResult: (KakaoLoginResult) -> Unit,
-    ) {
+    fun login(context: Context, onResult: (KakaoLoginResult) -> Unit) {
         val accountLoginCallback: (OAuthToken?, Throwable?) -> Unit = { token, error ->
             onResult(token.toLoginResult(error))
         }
-
         if (!UserApiClient.instance.isKakaoTalkLoginAvailable(context)) {
-            UserApiClient.instance.loginWithKakaoAccount(
-                context = context,
-                callback = accountLoginCallback,
-            )
+            UserApiClient.instance.loginWithKakaoAccount(context = context, callback = accountLoginCallback)
             return
         }
-
         UserApiClient.instance.loginWithKakaoTalk(context) { token, error ->
             when {
                 token != null -> onResult(KakaoLoginResult.Success(token.accessToken))
-                error is ClientError && error.reason == ClientErrorCause.Cancelled -> {
-                    onResult(KakaoLoginResult.Cancelled)
-                }
-                else -> {
-                    UserApiClient.instance.loginWithKakaoAccount(
-                        context = context,
-                        callback = accountLoginCallback,
-                    )
-                }
+                error is ClientError && error.reason == ClientErrorCause.Cancelled -> onResult(KakaoLoginResult.Cancelled)
+                else -> UserApiClient.instance.loginWithKakaoAccount(context = context, callback = accountLoginCallback)
             }
         }
     }
@@ -52,4 +37,3 @@ private fun OAuthToken?.toLoginResult(error: Throwable?): KakaoLoginResult = whe
     error != null -> KakaoLoginResult.Failure(error)
     else -> KakaoLoginResult.Failure(IllegalStateException("카카오 로그인 결과가 없습니다."))
 }
-
