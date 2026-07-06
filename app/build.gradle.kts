@@ -13,6 +13,8 @@ val localProperties = Properties().apply {
 }
 val kakaoNativeAppKey = localProperties.getProperty("KAKAO_NATIVE_APP_KEY", "")
 val uiReviewMode = localProperties.getProperty("UI_REVIEW_MODE", "false").toBoolean()
+val apiBaseUrl = localProperties.getProperty("API_BASE_URL", "http://10.0.2.2:8080")
+val apiDevAuth = localProperties.getProperty("API_DEV_AUTH", "false").toBoolean()
 
 android {
     namespace = "com.inbu.ledger"
@@ -28,6 +30,8 @@ android {
         manifestPlaceholders["KAKAO_NATIVE_APP_KEY"] =
             kakaoNativeAppKey.ifBlank { "not_configured" }
         buildConfigField("String", "KAKAO_NATIVE_APP_KEY", "\"$kakaoNativeAppKey\"")
+        buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
+        buildConfigField("boolean", "API_DEV_AUTH", apiDevAuth.toString())
         buildConfigField("boolean", "UI_REVIEW_MODE", uiReviewMode.toString())
     }
 

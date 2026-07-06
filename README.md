@@ -29,10 +29,11 @@
 패키지명은 앱의 `applicationId`와 동일하게 입력하고, 개발·배포 인증서의 키 해시를
 각각 생성해 등록합니다.
 
-그 후 Git에 포함되지 않는 `local.properties`에 네이티브 앱 키를 추가합니다.
+그 후 예시 파일을 복사하고 Git에 포함되지 않는 `local.properties`에 네이티브 앱 키를
+추가합니다. 실제 키는 README나 `local.properties.example`에 기록하지 않습니다.
 
-```properties
-KAKAO_NATIVE_APP_KEY=발급받은_네이티브_앱_키
+```bash
+cp local.properties.example local.properties
 ```
 
 앱 키가 없더라도 프로젝트는 빌드되며, 로그인 버튼을 누르면 설정 안내를 표시합니다.
@@ -44,3 +45,11 @@ KAKAO_NATIVE_APP_KEY=발급받은_네이티브_앱_키
 ```
 
 디버그 APK는 `app/build/outputs/apk/debug/app-debug.apk`에 생성됩니다.
+
+## API 서버 연결
+
+Android 에뮬레이터에서는 기본 로컬 서버 주소를 사용하며 `local.properties`의
+`API_BASE_URL`로 개발·배포 서버 주소를 바꿀 수 있습니다. 실제 주소와 카카오 앱 키가
+들어가는 `local.properties`는 Git에서 제외됩니다. 디버그 빌드에서만 로컬 HTTP
+통신을 허용하며 릴리스 서버는 HTTPS 주소를 사용해야 합니다. 백엔드는 별도 저장소로
+관리합니다.

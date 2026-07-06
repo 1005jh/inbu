@@ -1,4 +1,6 @@
 # Copy this file to local.properties and fill in values for your machine.
 sdk.dir=/path/to/Android/sdk
-KAKAO_NATIVE_APP_KEY=your_native_app_key
+KAKAO_NATIVE_APP_KEY=KAKAO_NATIVE_APP_KEY_HERE
 UI_REVIEW_MODE=false
+API_BASE_URL=API_BASE_URL_HERE
+API_DEV_AUTH=false

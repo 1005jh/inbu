@@ -1,17 +1,23 @@
 package com.inbu.ledger.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast
 import com.inbu.ledger.BuildConfig
 import com.inbu.ledger.auth.KakaoLoginClient
 import com.inbu.ledger.auth.KakaoLoginResult
+import com.inbu.ledger.data.LedgerApiClient
+import com.inbu.ledger.data.LedgerSnapshot
 import com.inbu.ledger.ui.auth.LoginScreen
 import com.inbu.ledger.ui.home.HomeScreen
+import com.inbu.ledger.ui.home.HomeUiState
+import com.inbu.ledger.ui.home.PaymentState
 import com.inbu.ledger.ui.components.MainSection
 import com.inbu.ledger.ui.sites.SitesScreen
 import com.inbu.ledger.ui.sites.AddSiteScreen
@@ -61,20 +67,21 @@ private enum class AppScreen {
 fun InbuLedgerApp() {
     val context = LocalContext.current
     val loginClient = remember { KakaoLoginClient() }
+    val apiClient = remember { LedgerApiClient(context.applicationContext) }
     var appScreen by rememberSaveable {
         mutableStateOf(if (BuildConfig.UI_REVIEW_MODE) AppScreen.Home else AppScreen.Login)
     }
     var isLoggingIn by rememberSaveable { mutableStateOf(false) }
     var loginMessage by rememberSaveable { mutableStateOf<String?>(null) }
-    var sites by remember { mutableStateOf(SiteMockData.sites) }
+    var sites by remember { mutableStateOf(if (BuildConfig.UI_REVIEW_MODE) SiteMockData.sites else emptyList()) }
     var deletedSites by remember { mutableStateOf(emptyList<SiteSummary>()) }
     var selectedSiteId by rememberSaveable { mutableStateOf<Long?>(null) }
-    var workers by remember { mutableStateOf(WorkerMockData.workers) }
+    var workers by remember { mutableStateOf(if (BuildConfig.UI_REVIEW_MODE) WorkerMockData.workers else emptyList()) }
     var selectedWorkerId by rememberSaveable { mutableStateOf<Long?>(null) }
-    var workRecords by remember { mutableStateOf(WorkRecordMockData.records) }
+    var workRecords by remember { mutableStateOf(if (BuildConfig.UI_REVIEW_MODE) WorkRecordMockData.records else emptyList()) }
     var deletedWorkRecords by remember { mutableStateOf(emptyList<WorkRecordSummary>()) }
     var selectedRecordId by rememberSaveable { mutableStateOf<Long?>(null) }
-    var payments by remember { mutableStateOf(PaymentMockData.payments) }
+    var payments by remember { mutableStateOf(if (BuildConfig.UI_REVIEW_MODE) PaymentMockData.payments else emptyList()) }
     var selectedPaymentSiteId by rememberSaveable { mutableStateOf<Long?>(null) }
     var selectedPaymentCutoff by rememberSaveable { mutableStateOf<Long?>(null) }
     var paymentBackToRecords by rememberSaveable { mutableStateOf(false) }
@@ -82,6 +89,50 @@ fun InbuLedgerApp() {
     val queryableSiteIds = sites.mapTo(mutableSetOf()) { it.id }
     val queryableWorkRecords = workRecords.filter { it.siteId in queryableSiteIds }
     val queryablePayments = payments.filter { it.siteId in queryableSiteIds }
+    val homeUiState = buildHomeUiState(sites, queryableWorkRecords, queryablePayments)
+
+    fun applySnapshot(snapshot: LedgerSnapshot) {
+        sites = snapshot.sites
+        deletedSites = snapshot.deletedSites
+        workers = snapshot.workers
+        workRecords = snapshot.workRecords
+        deletedWorkRecords = snapshot.deletedWorkRecords
+        payments = snapshot.payments
+    }
+
+    fun handleSnapshot(result: Result<LedgerSnapshot>, onSuccess: () -> Unit = {}) {
+        result.fold(
+            onSuccess = {
+                applySnapshot(it)
+                onSuccess()
+            },
+            onFailure = {
+                Toast.makeText(context, it.message ?: "서버 요청에 실패했어요.", Toast.LENGTH_SHORT).show()
+                if (!apiClient.hasSession) appScreen = AppScreen.Login
+            },
+        )
+    }
+
+    LaunchedEffect(Unit) {
+        if (!BuildConfig.UI_REVIEW_MODE) {
+            when {
+                apiClient.hasSession -> {
+                    isLoggingIn = true
+                    apiClient.loadLedger { result ->
+                        isLoggingIn = false
+                        handleSnapshot(result) { appScreen = AppScreen.Home }
+                    }
+                }
+                BuildConfig.DEBUG && BuildConfig.API_DEV_AUTH -> {
+                    isLoggingIn = true
+                    apiClient.loginForDevelopment { result ->
+                        isLoggingIn = false
+                        handleSnapshot(result) { appScreen = AppScreen.Home }
+                    }
+                }
+            }
+        }
+    }
 
     when (appScreen) {
         AppScreen.Login -> LoginScreen(
@@ -99,8 +150,19 @@ fun InbuLedgerApp() {
                     isLoggingIn = false
                     when (result) {
                         is KakaoLoginResult.Success -> {
-                            // 서버 구현 단계에서 accessToken을 서버 세션으로 교환합니다.
-                            appScreen = AppScreen.Home
+                            isLoggingIn = true
+                            apiClient.exchangeKakaoToken(result.accessToken) { exchangeResult ->
+                                isLoggingIn = false
+                                exchangeResult.fold(
+                                    onSuccess = {
+                                        applySnapshot(it)
+                                        appScreen = AppScreen.Home
+                                    },
+                                    onFailure = {
+                                        loginMessage = it.message ?: "서버 로그인에 실패했어요."
+                                    },
+                                )
+                            }
                         }
                         KakaoLoginResult.Cancelled -> Unit
                         is KakaoLoginResult.Failure -> {
@@ -111,6 +173,12 @@ fun InbuLedgerApp() {
             },
         )
         AppScreen.Home -> HomeScreen(
+            uiState = homeUiState,
+            onRecordWork = { appScreen = AppScreen.WorkRecord },
+            onOpenRecord = { recordId ->
+                selectedRecordId = recordId
+                appScreen = AppScreen.RecordDetail
+            },
             onSectionSelected = { section ->
                 when (section) {
                     MainSection.Work -> appScreen = AppScreen.WorkRecord
@@ -141,16 +209,20 @@ fun InbuLedgerApp() {
         AppScreen.AddSite -> AddSiteScreen(
             onBack = { appScreen = AppScreen.Sites },
             onSave = { name, memo ->
-                val newSite = SiteSummary(
-                    id = (sites.maxOfOrNull { it.id } ?: 0L) + 1L,
-                    name = name,
-                    memo = memo.ifBlank { "추가 정보 없음" },
-                    status = SiteStatus.Active,
-                    totalWorkUnits = 0.0,
-                    unpaidAmount = 0,
-                )
-                sites = listOf(newSite) + sites
-                appScreen = AppScreen.Sites
+                if (BuildConfig.UI_REVIEW_MODE) {
+                    val newSite = SiteSummary(
+                        id = (sites.maxOfOrNull { it.id } ?: 0L) + 1L,
+                        name = name,
+                        memo = memo.ifBlank { "추가 정보 없음" },
+                        status = SiteStatus.Active,
+                        totalWorkUnits = 0.0,
+                        unpaidAmount = 0,
+                    )
+                    sites = listOf(newSite) + sites
+                    appScreen = AppScreen.Sites
+                } else {
+                    apiClient.createSite(name, memo) { handleSnapshot(it) { appScreen = AppScreen.Sites } }
+                }
             },
         )
         AppScreen.SiteDetail -> {
@@ -162,15 +234,28 @@ fun InbuLedgerApp() {
                     site = selectedSite,
                     onBack = { appScreen = AppScreen.Sites },
                     onSave = { updatedSite ->
-                        sites = sites.map { site ->
-                            if (site.id == updatedSite.id) updatedSite else site
+                        if (BuildConfig.UI_REVIEW_MODE) {
+                            sites = sites.map { site ->
+                                if (site.id == updatedSite.id) updatedSite else site
+                            }
+                        } else {
+                            apiClient.updateSite(updatedSite) { handleSnapshot(it) }
                         }
                     },
                     onMoveToTrash = {
-                        deletedSites = listOf(selectedSite) + deletedSites
-                        sites = sites.filterNot { it.id == selectedSite.id }
-                        selectedSiteId = null
-                        appScreen = AppScreen.Sites
+                        if (BuildConfig.UI_REVIEW_MODE) {
+                            deletedSites = listOf(selectedSite) + deletedSites
+                            sites = sites.filterNot { it.id == selectedSite.id }
+                            selectedSiteId = null
+                            appScreen = AppScreen.Sites
+                        } else {
+                            apiClient.trashSite(selectedSite.id) {
+                                handleSnapshot(it) {
+                                    selectedSiteId = null
+                                    appScreen = AppScreen.Sites
+                                }
+                            }
+                        }
                     },
                 )
             }
@@ -205,8 +290,12 @@ fun InbuLedgerApp() {
                     unpaidAmount = 0,
                     isActive = true,
                 )
-                workers = listOf(newWorker) + workers
-                appScreen = AppScreen.Workers
+                if (BuildConfig.UI_REVIEW_MODE) {
+                    workers = listOf(newWorker) + workers
+                    appScreen = AppScreen.Workers
+                } else {
+                    apiClient.createWorker(newWorker) { handleSnapshot(it) { appScreen = AppScreen.Workers } }
+                }
             },
         )
         AppScreen.WorkerDetail -> {
@@ -219,13 +308,22 @@ fun InbuLedgerApp() {
                     sites = sites,
                     onBack = { appScreen = AppScreen.Workers },
                     onSave = { updatedWorker ->
-                        workers = workers.map { worker ->
-                            if (worker.id == updatedWorker.id) updatedWorker else worker
+                        if (BuildConfig.UI_REVIEW_MODE) {
+                            workers = workers.map { worker ->
+                                if (worker.id == updatedWorker.id) updatedWorker else worker
+                            }
+                        } else {
+                            apiClient.updateWorker(updatedWorker) { handleSnapshot(it) }
                         }
                     },
                     onActiveChange = { isActive ->
-                        workers = workers.map { worker ->
-                            if (worker.id == selectedWorker.id) worker.copy(isActive = isActive) else worker
+                        val updatedWorker = selectedWorker.copy(isActive = isActive)
+                        if (BuildConfig.UI_REVIEW_MODE) {
+                            workers = workers.map { worker ->
+                                if (worker.id == selectedWorker.id) updatedWorker else worker
+                            }
+                        } else {
+                            apiClient.updateWorker(updatedWorker) { handleSnapshot(it) }
                         }
                     },
                 )
@@ -245,11 +343,14 @@ fun InbuLedgerApp() {
                     fuelCost = fuelCost,
                     mealCost = mealCost,
                 )
-                workRecords = listOf(newRecord) + workRecords
-
-                workers = workers.applyWorkerRecord(newRecord, direction = 1)
-                sites = sites.applySiteRecord(newRecord, direction = 1)
-                appScreen = AppScreen.Home
+                if (BuildConfig.UI_REVIEW_MODE) {
+                    workRecords = listOf(newRecord) + workRecords
+                    workers = workers.applyWorkerRecord(newRecord, direction = 1)
+                    sites = sites.applySiteRecord(newRecord, direction = 1)
+                    appScreen = AppScreen.Home
+                } else {
+                    apiClient.createRecord(newRecord) { handleSnapshot(it) { appScreen = AppScreen.Home } }
+                }
             },
             onSectionSelected = { section ->
                 when (section) {
@@ -303,12 +404,21 @@ fun InbuLedgerApp() {
                     onBack = { appScreen = AppScreen.Records },
                     onEdit = { appScreen = AppScreen.EditRecord },
                     onMoveToTrash = {
-                        workers = workers.applyWorkerRecord(record, direction = -1)
-                        sites = sites.applySiteRecord(record, direction = -1)
-                        workRecords = workRecords.filterNot { it.id == record.id }
-                        deletedWorkRecords = listOf(record) + deletedWorkRecords
-                        selectedRecordId = null
-                        appScreen = AppScreen.Records
+                        if (BuildConfig.UI_REVIEW_MODE) {
+                            workers = workers.applyWorkerRecord(record, direction = -1)
+                            sites = sites.applySiteRecord(record, direction = -1)
+                            workRecords = workRecords.filterNot { it.id == record.id }
+                            deletedWorkRecords = listOf(record) + deletedWorkRecords
+                            selectedRecordId = null
+                            appScreen = AppScreen.Records
+                        } else {
+                            apiClient.trashRecord(record.id) {
+                                handleSnapshot(it) {
+                                    selectedRecordId = null
+                                    appScreen = AppScreen.Records
+                                }
+                            }
+                        }
                     },
                 )
             }
@@ -333,16 +443,20 @@ fun InbuLedgerApp() {
                             fuelCost = fuelCost,
                             mealCost = mealCost,
                         )
-                        workers = workers
-                            .applyWorkerRecord(originalRecord, direction = -1)
-                            .applyWorkerRecord(updatedRecord, direction = 1)
-                        sites = sites
-                            .applySiteRecord(originalRecord, direction = -1)
-                            .applySiteRecord(updatedRecord, direction = 1)
-                        workRecords = workRecords.map { record ->
-                            if (record.id == updatedRecord.id) updatedRecord else record
+                        if (BuildConfig.UI_REVIEW_MODE) {
+                            workers = workers
+                                .applyWorkerRecord(originalRecord, direction = -1)
+                                .applyWorkerRecord(updatedRecord, direction = 1)
+                            sites = sites
+                                .applySiteRecord(originalRecord, direction = -1)
+                                .applySiteRecord(updatedRecord, direction = 1)
+                            workRecords = workRecords.map { record ->
+                                if (record.id == updatedRecord.id) updatedRecord else record
+                            }
+                            appScreen = AppScreen.RecordDetail
+                        } else {
+                            apiClient.updateRecord(updatedRecord) { handleSnapshot(it) { appScreen = AppScreen.RecordDetail } }
                         }
-                        appScreen = AppScreen.RecordDetail
                     },
                 )
             }
@@ -355,15 +469,23 @@ fun InbuLedgerApp() {
             }.toSet(),
             onBack = { appScreen = AppScreen.Records },
             onRestore = { recordId ->
-                deletedWorkRecords.firstOrNull { it.id == recordId }?.let { record ->
-                    workers = workers.applyWorkerRecord(record, direction = 1)
-                    sites = sites.applySiteRecord(record, direction = 1)
-                    workRecords = listOf(record) + workRecords
-                    deletedWorkRecords = deletedWorkRecords.filterNot { it.id == recordId }
+                if (BuildConfig.UI_REVIEW_MODE) {
+                    deletedWorkRecords.firstOrNull { it.id == recordId }?.let { record ->
+                        workers = workers.applyWorkerRecord(record, direction = 1)
+                        sites = sites.applySiteRecord(record, direction = 1)
+                        workRecords = listOf(record) + workRecords
+                        deletedWorkRecords = deletedWorkRecords.filterNot { it.id == recordId }
+                    }
+                } else {
+                    apiClient.restoreRecord(recordId) { handleSnapshot(it) }
                 }
             },
             onDeletePermanently = { recordId ->
-                deletedWorkRecords = deletedWorkRecords.filterNot { it.id == recordId }
+                if (BuildConfig.UI_REVIEW_MODE) {
+                    deletedWorkRecords = deletedWorkRecords.filterNot { it.id == recordId }
+                } else {
+                    apiClient.deleteRecord(recordId) { handleSnapshot(it) }
+                }
             },
         )
         AppScreen.Payments -> PaymentsScreen(
@@ -402,51 +524,59 @@ fun InbuLedgerApp() {
                         appScreen = if (paymentBackToRecords) AppScreen.Records else AppScreen.Payments
                     },
                     onSettle = { siteId, cutoffEpochDay ->
-                        val payment = settlePayment(
-                            id = (payments.maxOfOrNull { it.id } ?: 0L) + 1L,
-                            workerId = worker.id,
-                            siteId = siteId,
-                            cutoffEpochDay = cutoffEpochDay,
-                            records = queryableWorkRecords,
-                            existingPayments = queryablePayments,
-                        )
-                        if (payment.amount > 0) {
-                            payments = listOf(payment) + payments
-                            workers = workers.map { item ->
-                                if (item.id == worker.id) {
-                                    item.copy(unpaidAmount = (item.unpaidAmount - payment.amount).coerceAtLeast(0L))
-                                } else {
-                                    item
+                        if (BuildConfig.UI_REVIEW_MODE) {
+                            val payment = settlePayment(
+                                id = (payments.maxOfOrNull { it.id } ?: 0L) + 1L,
+                                workerId = worker.id,
+                                siteId = siteId,
+                                cutoffEpochDay = cutoffEpochDay,
+                                records = queryableWorkRecords,
+                                existingPayments = queryablePayments,
+                            )
+                            if (payment.amount > 0) {
+                                payments = listOf(payment) + payments
+                                workers = workers.map { item ->
+                                    if (item.id == worker.id) {
+                                        item.copy(unpaidAmount = (item.unpaidAmount - payment.amount).coerceAtLeast(0L))
+                                    } else {
+                                        item
+                                    }
+                                }
+                                val paidBySite = payment.allocations.groupBy { allocation ->
+                                    workRecords.firstOrNull { it.id == allocation.recordId }?.siteId
+                                }.mapNotNull { (paymentSiteId, allocations) ->
+                                    paymentSiteId?.let { it to allocations.sumOf { allocation -> allocation.amount } }
+                                }.toMap()
+                                sites = sites.map { site ->
+                                    val paidAmount = paidBySite[site.id] ?: return@map site
+                                    site.copy(unpaidAmount = (site.unpaidAmount - paidAmount).coerceAtLeast(0L))
                                 }
                             }
-                            val paidBySite = payment.allocations.groupBy { allocation ->
-                                workRecords.firstOrNull { it.id == allocation.recordId }?.siteId
-                            }.mapNotNull { (siteId, allocations) ->
-                                siteId?.let { it to allocations.sumOf { allocation -> allocation.amount } }
-                            }.toMap()
-                            sites = sites.map { site ->
-                                val paidAmount = paidBySite[site.id] ?: return@map site
-                                site.copy(unpaidAmount = (site.unpaidAmount - paidAmount).coerceAtLeast(0L))
-                            }
+                        } else {
+                            apiClient.settlePayment(worker.id, siteId, cutoffEpochDay) { handleSnapshot(it) }
                         }
                     },
                     onCancelPayment = { paymentId ->
-                        payments.firstOrNull { it.id == paymentId }?.let { payment ->
-                            payments = payments.filterNot { it.id == paymentId }
-                            workers = workers.map { item ->
-                                if (item.id == payment.workerId) {
-                                    item.copy(unpaidAmount = item.unpaidAmount + payment.amount)
-                                } else {
-                                    item
+                        if (BuildConfig.UI_REVIEW_MODE) {
+                            payments.firstOrNull { it.id == paymentId }?.let { payment ->
+                                payments = payments.filterNot { it.id == paymentId }
+                                workers = workers.map { item ->
+                                    if (item.id == payment.workerId) {
+                                        item.copy(unpaidAmount = item.unpaidAmount + payment.amount)
+                                    } else {
+                                        item
+                                    }
+                                }
+                                sites = sites.map { site ->
+                                    if (site.id == payment.siteId) {
+                                        site.copy(unpaidAmount = site.unpaidAmount + payment.amount)
+                                    } else {
+                                        site
+                                    }
                                 }
                             }
-                            sites = sites.map { site ->
-                                if (site.id == payment.siteId) {
-                                    site.copy(unpaidAmount = site.unpaidAmount + payment.amount)
-                                } else {
-                                    site
-                                }
-                            }
+                        } else {
+                            apiClient.cancelPayment(paymentId) { handleSnapshot(it) }
                         }
                     },
                 )
@@ -461,16 +591,63 @@ fun InbuLedgerApp() {
             },
             onBack = { appScreen = AppScreen.Sites },
             onRestore = { siteId ->
-                deletedSites.firstOrNull { it.id == siteId }?.let { site ->
-                    sites = listOf(site) + sites
-                    deletedSites = deletedSites.filterNot { it.id == siteId }
+                if (BuildConfig.UI_REVIEW_MODE) {
+                    deletedSites.firstOrNull { it.id == siteId }?.let { site ->
+                        sites = listOf(site) + sites
+                        deletedSites = deletedSites.filterNot { it.id == siteId }
+                    }
+                } else {
+                    apiClient.restoreSite(siteId) { handleSnapshot(it) }
                 }
             },
             onDeletePermanently = { siteId ->
-                deletedSites = deletedSites.filterNot { it.id == siteId }
+                if (BuildConfig.UI_REVIEW_MODE) {
+                    deletedSites = deletedSites.filterNot { it.id == siteId }
+                } else {
+                    apiClient.deleteSite(siteId) { handleSnapshot(it) }
+                }
             },
         )
     }
+}
+
+private fun buildHomeUiState(
+    sites: List<SiteSummary>,
+    records: List<WorkRecordSummary>,
+    payments: List<WorkerPayment>,
+): HomeUiState {
+    val today = java.time.LocalDate.now()
+    val siteNames = sites.associate { it.id to it.name }
+    val formatter = java.time.format.DateTimeFormatter.ofPattern("M월 d일 EEEE", java.util.Locale.KOREAN)
+    return HomeUiState(
+        todayLabel = today.format(formatter),
+        records = records.sortedWith(compareByDescending<WorkRecordSummary> { it.dateEpochDay }.thenByDescending { it.id }).map { record ->
+            val date = java.time.LocalDate.ofEpochDay(record.dateEpochDay)
+            val gross = record.workers.sumOf { (it.dailyWage * it.workUnits).toLong() }
+            val paid = record.workers.sumOf { work -> payments.paidFor(record.id, work.workerId) }
+            val unpaid = (gross - paid).coerceAtLeast(0L)
+            com.inbu.ledger.ui.home.WorkRecordSummary(
+                id = record.id,
+                siteName = siteNames[record.siteId] ?: "삭제된 현장",
+                dateLabel = when (date) {
+                    today -> "오늘"
+                    today.minusDays(1) -> "어제"
+                    else -> "${date.monthValue}월 ${date.dayOfMonth}일"
+                },
+                dateShortLabel = "${date.monthValue}/${date.dayOfMonth}",
+                workerCount = record.workers.size,
+                workUnits = record.workers.sumOf { it.workUnits },
+                totalWage = gross,
+                unpaidAmount = unpaid,
+                paymentState = when {
+                    unpaid == 0L -> PaymentState.Paid
+                    paid > 0L -> PaymentState.PartiallyPaid
+                    else -> PaymentState.Unpaid
+                },
+                isToday = date == today,
+            )
+        },
+    )
 }
 
 private fun settlePayment(
