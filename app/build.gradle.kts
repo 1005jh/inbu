@@ -12,6 +12,7 @@ val localProperties = Properties().apply {
     }
 }
 val kakaoNativeAppKey = localProperties.getProperty("KAKAO_NATIVE_APP_KEY", "")
+val uiReviewMode = localProperties.getProperty("UI_REVIEW_MODE", "false").toBoolean()
 
 android {
     namespace = "com.inbu.ledger"
@@ -27,6 +28,7 @@ android {
         manifestPlaceholders["KAKAO_NATIVE_APP_KEY"] =
             kakaoNativeAppKey.ifBlank { "not_configured" }
         buildConfigField("String", "KAKAO_NATIVE_APP_KEY", "\"$kakaoNativeAppKey\"")
+        buildConfigField("boolean", "UI_REVIEW_MODE", uiReviewMode.toString())
     }
 
     buildTypes {
@@ -61,6 +63,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-core")
     implementation("com.kakao.sdk:v2-user:2.24.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
